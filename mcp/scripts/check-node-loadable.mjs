@@ -22,7 +22,9 @@ const LIB = new URL('../../frontend/src/lib/', import.meta.url)
 // which one, rather than which import chain.
 const MODULES = [
   'i18n-core.js', 'format.js', 'exercises.js', 'exercises-data.js',
-  'history.js', 'muscles.js', 'onerm.js', 'progression.js', 'queue.js'
+  'history.js', 'muscles.js', 'onerm.js', 'progression.js', 'queue.js',
+  // Reached by the write path (client.js, write-tools.js).
+  'sync-merge.js', 'plan-share.js', 'routines.js', 'day-notes.js'
 ]
 
 let failed = 0

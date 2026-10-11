@@ -4,7 +4,8 @@
       "command": "node",
       "args": ["mcp/src/index.js"],
       "env": {
-        "OPENGYM_URL": "http://localhost:8080"
+        "OPENGYM_URL": "https://opengym.abhaile.dev",
+        "OPENGYM_REMOTE": "1"
       }
     }
   }

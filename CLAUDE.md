@@ -6,12 +6,17 @@ his athletics gym programme. Upstream is DuarteSantos8/openGym; keep changes ups
 
 ## Running things
 
-- Instance: `docker compose up -d` here; data in `./data`. Web at http://localhost:8080 and over
-  Tailscale at https://macbook-air.tail30add0.ts.net (passkeys only work on the ts.net URL).
-- MCP: registered in `.mcp.json` (stdio, `node mcp/src/index.js`). Writes need a token:
-  app → Settings → Pair the mobile app → `cd mcp && npm run pair -- <CODE>`.
+- Instance: on the mini PC (`ssh cph-minipc`), in the servarr compose project at
+  `~/Documents/projects/servarr` (services `api` and `opengym`, upstream prebuilt v1.4.1 images,
+  data in `config/opengym/data`, Caddy in front). Public URL https://opengym.abhaile.dev.
+  Upgrading: bump the two image tags in that compose file, `docker compose pull api opengym`,
+  `docker compose up -d api opengym`. Back up `config/opengym/data` first.
+- MCP: registered in `.mcp.json` in remote mode (stdio, `node mcp/src/index.js`, reads and
+  writes through the api at `OPENGYM_URL`). Writes need a token: app → Settings → Pair the
+  mobile app → `cd mcp && npm run pair -- <CODE> --url https://opengym.abhaile.dev`.
 - Tests: `cd mcp && npx vitest run && node scripts/check-node-loadable.mjs`. The api and
   frontend are unchanged in this fork; their suites are `cd api && npm test`, `cd frontend && npm test`.
+- No instance runs on the laptop; `docker compose up` here would start a separate empty one.
 
 ## How the write path works (read before touching mcp/src/client.js)
 

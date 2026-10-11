@@ -1,4 +1,4 @@
-/* The eight read-only tools. Each handler returns JSON; labels.js pre-substitutes any
+/* The nine read-only tools. Each handler returns JSON; labels.js pre-substitutes any
    {0}/{1} template the lib returns so the LLM gets final text, not template strings.
    ISO dates are validated on the way in; the handlers never see 'yesterday'. */
 import { z } from 'zod'
@@ -26,9 +26,9 @@ import { buildSessionEntries, startsFromLast } from '../../frontend/src/lib/sess
 // March 2 while echoing February 30 back as the date it had answered for. Round-trip the string
 // through the same local-noon construction the handlers use and insist it comes back unchanged;
 // as a zod refine that is a -32602 at the SDK boundary instead of a confident wrong answer.
-const localIso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
-const todayIso = () => localIso(new Date())
-const isoDate = () => z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').refine(
+export const localIso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+export const todayIso = () => localIso(new Date())
+export const isoDate = () => z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').refine(
   v => { const d = new Date(v + 'T12:00:00'); return !Number.isNaN(d.getTime()) && localIso(d) === v },
   { message: 'not a date the calendar has (YYYY-MM-DD)' }
 )
@@ -40,18 +40,18 @@ const isoDate = () => z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-D
 const customOf = (id, S) => (S.customEx || []).find(ex => ex.id === id)
 // exOr's miss is a placeholder object, not null — callers that only need a name are fine
 // with it, callers feeding muscle resolution are NOT. Use customOf directly there.
-const exerciseOf = (id, S) => customOf(id, S) || exOr(id)
+export const exerciseOf = (id, S) => customOf(id, S) || exOr(id)
 // The session builder, though, reads each exercise's equipment and body part from that global
 // index, so preview_session built a custom leg lift with the small load step where the app (which
 // registers its customs) takes the larger one. It registers the profile's customs for the length
 // of one synchronous build and takes them back out in the same call: nothing else, and no other
 // profile's read, can run in between.
-function withCustomsIndexed(S, build) {
+export function withCustomsIndexed(S, build) {
   registerCustom(Array.isArray(S.customEx) ? S.customEx : [])
   try { return build() } finally { registerCustom([]) }
 }
 
-function entryView(e, S) {
+export function entryView(e, S) {
   const ex = exerciseOf(e.id, S)
   // Spread id into the cfg the way every call site in the app does (Workout.jsx, Stats.jsx,
   // progression.js) — the sheet saves a cardio target as {sets, min, speed} with no id and no
@@ -105,7 +105,58 @@ function prTable(S, formula) {
   return [...byId.values()].sort((a, b) => b.est - a.est)
 }
 
-/* ---------- the 8 tools ---------- */
+/**
+ * A routine as get_routine shows it, built from the given state. get_routine reads the file on
+ * disk; the write tools (write-tools.js) pass the state they just changed, so a write confirms
+ * exactly what it wrote in the same shape a coach reads back.
+ */
+export function routineView(S, r) {
+  return {
+    id: r.id,
+    name: r.name,
+    emoji: r.emoji || null,
+    policy: policyFor(null, r, 'reps'),
+    policy_name: policyName(policyFor(null, r, 'reps')),
+    exclude_from_progression: r.excludeFromProgression === true,
+    unit: S.unit || 'kg',
+    exercises: (r.ex || []).map((cfg, i) => {
+      const ex = exerciseOf(cfg.id, S)
+      const mode = modeOf(cfg)
+      return {
+        position: i + 1,
+        id: cfg.id,
+        name: ex.n,
+        body_part: ex.bp || null,
+        mode,
+        sets: cfg.sets || 1,
+        reps: mode === 'reps' ? (cfg.reps || 0) : undefined,
+        reps_min: mode === 'reps' && cfg.repsMin != null ? cfg.repsMin : undefined,
+        reps_max: mode === 'reps' && cfg.repsMax != null ? cfg.repsMax : undefined,
+        // Pyramid sets: one rep target per set, in order; 'max' is as many reps as possible.
+        pyramid: mode === 'reps' && Array.isArray(cfg.pyramid) && cfg.pyramid.length ? cfg.pyramid : undefined,
+        // Each pyramid set's own rest in seconds, 0 meaning the exercise's rest.
+        pyramid_rest_sec: mode === 'reps' && Array.isArray(cfg.pyramid) && cfg.pyramid.length && Array.isArray(cfg.pyramidRest) && cfg.pyramidRest.length ? cfg.pyramidRest : undefined,
+        // Each pyramid set's own planned weight (#445), 0 meaning it starts from that set last time.
+        pyramid_weight: mode === 'reps' && Array.isArray(cfg.pyramid) && cfg.pyramid.length && Array.isArray(cfg.pyramidWeight) && cfg.pyramidWeight.length ? cfg.pyramidWeight : undefined,
+        sec: mode === 'time' ? (cfg.sec || 0) : undefined,
+        min: mode === 'cardio' ? (cfg.min || 0) : undefined,
+        speed: mode === 'cardio' ? (cfg.speed || 0) : undefined,
+        weight: cfg.weight != null ? cfg.weight : undefined,
+        increment: cfg.inc != null ? cfg.inc : undefined,
+        deload_factor: cfg.deloadFactor != null ? cfg.deloadFactor : undefined,
+        // The exercise's own rest (issue #10). Absent means it inherits the global rest
+        // timer; a superset rests once, taking the longest its members ask for.
+        rest_sec: cfg.restSec > 0 ? cfg.restSec : undefined,
+        policy: policyFor(cfg, r, mode),
+        policy_override: cfg.prog || null,
+        superset_group: cfg.sg || null,
+        summary: exLine(cfg, S.unit || 'kg')
+      }
+    })
+  }
+}
+
+/* ---------- the nine tools ---------- */
 
 /** list_routines — names + counts of each routine in the user's plan. */
 export const listRoutines = {
@@ -140,49 +191,7 @@ export const getRoutine = {
     if (!S) return noState()
     const r = (S.routines || []).find(x => x.id === routine_id)
     if (!r) { const e = new Error(`no routine with id ${JSON.stringify(routine_id)}`); e.code = 'ENOENT'; throw e }
-    return {
-      id: r.id,
-      name: r.name,
-      emoji: r.emoji || null,
-      policy: policyFor(null, r, 'reps'),
-      policy_name: policyName(policyFor(null, r, 'reps')),
-      exclude_from_progression: r.excludeFromProgression === true,
-      unit: S.unit || 'kg',
-      exercises: (r.ex || []).map((cfg, i) => {
-        const ex = exerciseOf(cfg.id, S)
-        const mode = modeOf(cfg)
-        return {
-          position: i + 1,
-          id: cfg.id,
-          name: ex.n,
-          body_part: ex.bp || null,
-          mode,
-          sets: cfg.sets || 1,
-          reps: mode === 'reps' ? (cfg.reps || 0) : undefined,
-          reps_min: mode === 'reps' && cfg.repsMin != null ? cfg.repsMin : undefined,
-          reps_max: mode === 'reps' && cfg.repsMax != null ? cfg.repsMax : undefined,
-          // Pyramid sets: one rep target per set, in order; 'max' is as many reps as possible.
-          pyramid: mode === 'reps' && Array.isArray(cfg.pyramid) && cfg.pyramid.length ? cfg.pyramid : undefined,
-          // Each pyramid set's own rest in seconds, 0 meaning the exercise's rest.
-          pyramid_rest_sec: mode === 'reps' && Array.isArray(cfg.pyramid) && cfg.pyramid.length && Array.isArray(cfg.pyramidRest) && cfg.pyramidRest.length ? cfg.pyramidRest : undefined,
-          // Each pyramid set's own planned weight (#445), 0 meaning it starts from that set last time.
-          pyramid_weight: mode === 'reps' && Array.isArray(cfg.pyramid) && cfg.pyramid.length && Array.isArray(cfg.pyramidWeight) && cfg.pyramidWeight.length ? cfg.pyramidWeight : undefined,
-          sec: mode === 'time' ? (cfg.sec || 0) : undefined,
-          min: mode === 'cardio' ? (cfg.min || 0) : undefined,
-          speed: mode === 'cardio' ? (cfg.speed || 0) : undefined,
-          weight: cfg.weight != null ? cfg.weight : undefined,
-          increment: cfg.inc != null ? cfg.inc : undefined,
-          deload_factor: cfg.deloadFactor != null ? cfg.deloadFactor : undefined,
-          // The exercise's own rest (issue #10). Absent means it inherits the global rest
-          // timer; a superset rests once, taking the longest its members ask for.
-          rest_sec: cfg.restSec > 0 ? cfg.restSec : undefined,
-          policy: policyFor(cfg, r, mode),
-          policy_override: cfg.prog || null,
-          superset_group: cfg.sg || null,
-          summary: exLine(cfg, S.unit || 'kg')
-        }
-      })
-    }
+    return routineView(S, r)
   }
 }
 

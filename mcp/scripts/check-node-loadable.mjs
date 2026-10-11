@@ -24,7 +24,8 @@ const MODULES = [
   'i18n-core.js', 'format.js', 'exercises.js', 'exercises-data.js',
   'history.js', 'muscles.js', 'onerm.js', 'progression.js', 'queue.js',
   // Reached by the write path (client.js, write-tools.js).
-  'sync-merge.js', 'plan-share.js', 'routines.js', 'day-notes.js'
+  'sync-merge.js', 'routines.js', 'day-notes.js', 'equipment.js', 'backfill.js',
+  'workout-date.js', 'superset-meta.js'
 ]
 
 let failed = 0
@@ -40,7 +41,7 @@ for (const m of MODULES) {
 
 // The real assertion: the server's own entry points, which pull the whole graph transitively.
 // A module added to the graph later is covered by this even if the list above never learns it.
-for (const entry of ['../src/state.js', '../src/tools.js']) {
+for (const entry of ['../src/state.js', '../src/tools.js', '../src/client.js', '../src/write-tools.js']) {
   try {
     await import(new URL(entry, import.meta.url))
     console.log(`  ok    mcp/${entry.replace('../', '')}`)

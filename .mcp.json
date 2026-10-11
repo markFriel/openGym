@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "opengym": {
+      "command": "node",
+      "args": ["mcp/src/index.js"],
+      "env": {
+        "OPENGYM_URL": "http://localhost:8080"
+      }
+    }
+  }
+}

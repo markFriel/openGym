@@ -364,9 +364,11 @@ opengym.abhaile.dev {
 
 The host must be reachable from the internet, because claude.ai connects from Anthropic's
 servers, not from your phone. A site that only resolves inside a Tailscale network needs a
-public door for this one port: `tailscale funnel --bg http://127.0.0.1:8086` publishes it at
-`https://<machine>.<tailnet>.ts.net/mcp/<secret>` with nothing else exposed. Mount it at the
-root, not with `--set-path /mcp`, which strips the prefix the server expects.
+public door for this one port: `tailscale funnel --bg --https=8443 http://127.0.0.1:8086`
+publishes it at `https://<machine>.<tailnet>.ts.net:8443/mcp/<secret>` with nothing else
+exposed. Mount it at the root, not with `--set-path /mcp`, which strips the prefix the server
+expects; and not on 443 if a reverse proxy on the same machine already serves the app on the
+tailnet address, because Funnel on 443 takes that port over for every tailnet client.
 
 Then in claude.ai: Settings → Connectors → Add custom connector → URL
 `https://<host>/mcp/<secret>`, leave the OAuth fields empty, save. Switch the connector on in a

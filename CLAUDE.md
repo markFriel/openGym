@@ -16,6 +16,12 @@ his athletics gym programme. Upstream is DuarteSantos8/openGym; keep changes ups
   mobile app → `cd mcp && npm run pair -- <CODE> --url https://opengym.abhaile.dev`.
 - Tests: `cd mcp && npx vitest run && node scripts/check-node-loadable.mjs`. The api and
   frontend are unchanged in this fork; their suites are `cd api && npm test`, `cd frontend && npm test`.
+- Phone: the same tools run as the `opengym-mcp` container on the mini PC (built from the fork
+  clone at `~/Documents/projects/servarr/data/openGym`, Caddy routes `/mcp/*` to it) and are
+  added to claude.ai as a custom connector at `https://opengym.abhaile.dev/mcp/<secret>`; the
+  secret is `OPENGYM_MCP_SECRET` in the servarr `.env`. Its token is paired separately:
+  `docker compose run --rm opengym-mcp node scripts/pair.mjs <CODE> --url http://api:3000 --token-file /token/opengym.json`.
+  Redeploy after a push: `git -C data/openGym pull && docker compose up -d --build opengym-mcp`.
 - No instance runs on the laptop; `docker compose up` here would start a separate empty one.
 
 ## How the write path works (read before touching mcp/src/client.js)

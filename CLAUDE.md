@@ -18,8 +18,10 @@ his athletics gym programme. Upstream is DuarteSantos8/openGym; keep changes ups
   frontend are unchanged in this fork; their suites are `cd api && npm test`, `cd frontend && npm test`.
 - Phone: the same tools run as the `opengym-mcp` container on the mini PC (built from the fork
   clone at `~/Documents/projects/servarr/data/openGym`, Caddy routes `/mcp/*` to it) and are
-  added to claude.ai as a custom connector at `https://opengym.abhaile.dev/mcp/<secret>`; the
-  secret is `OPENGYM_MCP_SECRET` in the servarr `.env`. Its token is paired separately:
+  reached by claude.ai through Tailscale Funnel at `https://cphnas.tail30add0.ts.net/mcp/<secret>`
+  (opengym.abhaile.dev resolves to a tailnet address, so Anthropic's servers cannot use it; the
+  Funnel is mounted at the root of port 8086 because `--set-path` strips the prefix). The secret
+  is `OPENGYM_MCP_SECRET` in the servarr `.env`. Its token is paired separately:
   `docker compose run --rm opengym-mcp node scripts/pair.mjs <CODE> --url http://api:3000 --token-file /token/opengym.json`.
   Redeploy after a push: `git -C data/openGym pull && docker compose up -d --build opengym-mcp`.
 - No instance runs on the laptop; `docker compose up` here would start a separate empty one.

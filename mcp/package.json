@@ -7,13 +7,15 @@
   "license": "AGPL-3.0-or-later",
   "main": "src/index.js",
   "bin": {
-    "opengym-mcp": "src/index.js"
+    "opengym-mcp": "src/index.js",
+    "opengym-mcp-http": "src/http.js"
   },
   "scripts": {
     "start": "node src/index.js",
     "pair": "node scripts/pair.mjs",
     "test": "vitest run",
-    "check:node-loadable": "node scripts/check-node-loadable.mjs"
+    "check:node-loadable": "node scripts/check-node-loadable.mjs",
+    "start:http": "node src/http.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",

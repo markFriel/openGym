@@ -290,6 +290,84 @@ Around that:
 open, and again when it comes back into focus, so a change made by the coach appears within 30
 seconds, or as soon as the app is opened.
 
+## Remote MCP over HTTPS (the phone, claude.ai)
+
+Everything above runs the server as a process your LLM client spawns on the same machine. The
+Claude phone app cannot spawn processes: it reaches MCP servers over HTTPS as **custom
+connectors** (claude.ai, Settings → Connectors, available on every plan including Pro, and the
+connection is made from Anthropic's cloud, so the server has to be reachable from the internet).
+For that, `src/http.js` serves the same tools over the Streamable HTTP transport, and
+`Dockerfile` packages it to run next to the api.
+
+It is stateless: every request gets its own transport and server, nothing is held between
+requests except the cached profile document. Reads and writes both go through the api (remote
+mode), so no data directory is mounted.
+
+**Auth** is one shared secret, `MCP_SECRET`, accepted two ways:
+
+| Form | Who uses it |
+|---|---|
+| `POST https://<host>/mcp/<secret>` | claude.ai custom connectors, which cannot set a header without OAuth |
+| `POST https://<host>/mcp` with `Authorization: Bearer <secret>` | Claude Code (`claude mcp add --transport http`), scripts |
+
+Over TLS the URL form is as strong as the header form. It does end up in the proxy's access log
+and in the connector settings, so treat it like a password and rotate it by changing
+`MCP_SECRET`. The spec's preferred route for remote servers is OAuth; it is not implemented.
+`GET /mcp/health` needs no secret and reports `{ ok, mode, profile, writable }`. The server
+refuses to start without `MCP_SECRET` unless `MCP_INSECURE=1` (a box nothing else can reach).
+
+Env: `MCP_PORT` (8086), `MCP_HOST` (0.0.0.0), `MCP_PATH` (/mcp), `MCP_SECRET`, plus the usual
+`OPENGYM_URL` and token settings. The image sets `OPENGYM_REMOTE=1` and
+`OPENGYM_TOKEN_FILE=/token/opengym.json`.
+
+### Running it with Docker Compose next to the api
+
+Build from the repository root (the training logic lives in `frontend/src/lib`):
+
+```yaml
+  opengym-mcp:
+    build:
+      context: ./openGym          # a clone of this repository
+      dockerfile: mcp/Dockerfile
+    container_name: opengym-mcp
+    environment:
+      - OPENGYM_URL=http://api:3000       # the api service, inside the compose network
+      - MCP_SECRET=${OPENGYM_MCP_SECRET}  # openssl rand -hex 32
+    volumes:
+      - ./config/opengym/mcp:/token       # the paired token; chown 1000:1000 (the node user)
+    ports:
+      - "127.0.0.1:8086:8086"             # only the reverse proxy talks to it
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+```
+
+Pair it once (the code comes from the app: Settings → Pair the mobile app):
+
+```bash
+docker compose run --rm opengym-mcp node scripts/pair.mjs <CODE> --url http://api:3000 --token-file /token/opengym.json
+docker compose up -d opengym-mcp
+curl -s http://127.0.0.1:8086/mcp/health   # "writable": true
+```
+
+Put it behind the same HTTPS host as the app. With Caddy, inside the existing site block:
+
+```
+opengym.abhaile.dev {
+    handle /mcp/* {
+        reverse_proxy localhost:8086
+    }
+    reverse_proxy localhost:8085
+}
+```
+
+Then in claude.ai: Settings → Connectors → Add custom connector → URL
+`https://<host>/mcp/<secret>`, leave the OAuth fields empty, save. Switch the connector on in a
+chat (the tools menu) and it is there on the phone, the web and the desktop. A claude.ai
+Project whose instructions hold your coaching rules (see the fork's `CLAUDE.md`) gives every
+chat the same behaviour.
+
 ## How it reuses the training logic
 
 The MCP server imports the training helpers under `frontend/src/lib/` directly as Node ESM
@@ -328,7 +406,7 @@ cd mcp && npm test
 node scripts/check-node-loadable.mjs
 ```
 
-198 cases in 7 files, seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic
+206 cases in 8 files, seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic
 fixture the public demo runs on):
 
 - `test/tools.test.js` (87) pins the read tools' JSON shape and the user-facing edge cases:
@@ -345,6 +423,8 @@ fixture the public demo runs on):
 - `test/remote.test.js` (11) drives remote mode against a fake api: what the first refresh
   fetches, skipping the document when the revision has not moved, the defaults merge, the
   token's user, a never-synced profile, `EAUTH` and `ECONN`, and a read tool answering from it.
+- `test/http.test.js` (8) drives the Streamable HTTP server with the SDK's own client: both
+  auth forms, the refusals, 405 on GET and DELETE, health, a read and a write through it.
 - `test/state.test.js` (13) and `test/labels.test.js` (1) cover data loading, mode selection and
   labels.
 
@@ -362,8 +442,9 @@ their own tests in `frontend/src/lib/*.test.js`.
   new token store were needed. Ten write tools and two read helpers.
 - **Not yet (Phase 2):** writing the coach week (queue) or the rotation, or switching the
   schedule mode; changing settings; media; deleting workouts.
-- **Phase 3:** Streamable HTTP transport, opt-in 4th container in `docker-compose.yml`. Same
-  tool implementations, second transport: the MCP SDK supports both behind one tool registration.
+- **Done (Phase 3):** Streamable HTTP transport (`src/http.js`) and a container
+  (`mcp/Dockerfile`) to run next to the api, so the Claude phone app reaches the same tools as a
+  claude.ai custom connector. Shared-secret auth; OAuth is the remaining gap.
 
 ## License
 

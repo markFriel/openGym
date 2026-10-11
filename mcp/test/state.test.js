@@ -120,3 +120,60 @@ describe('the "which profile?" error is a config message, not a roster', () => {
     })
   }
 })
+
+describe('mode selection', () => {
+  // A fresh state.js with only `env` set: no OPENGYM_UID, no stray token, and the default ./data
+  // resolved against `cwd` (a path that may not exist).
+  async function loadMode(env, cwd) {
+    vi.resetModules()
+    vi.stubEnv('HOME', mk({}))
+    for (const k of ['OPENGYM_DATA', 'OPENGYM_UID', 'OPENGYM_TOKEN', 'OPENGYM_TOKEN_FILE', 'OPENGYM_REMOTE']) vi.stubEnv(k, '')
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
+    if (cwd) vi.spyOn(process, 'cwd').mockReturnValue(cwd)
+    return import('../src/state.js')
+  }
+  const nowhere = () => path.join(mk({}), 'not-here')
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  test('OPENGYM_REMOTE=1 forces remote even with a data directory', async () => {
+    const s = await loadMode({ OPENGYM_REMOTE: '1', OPENGYM_DATA: mk({ 'db.json': DB }) })
+    expect(s.mode()).toBe('remote')
+    expect(s.getState()).toBeNull()
+    expect(s.getUser()).toEqual({ id: null, name: 'Profile', created: null })
+  })
+
+  test('a data directory present means file mode, even with a token', async () => {
+    const s = await loadMode({ OPENGYM_DATA: mk({ 'db.json': DB }), OPENGYM_TOKEN: 't1' })
+    expect(s.mode()).toBe('file')
+    expect(s.getUser().name).toBe('Alex')
+  })
+
+  test('the default ./data present means file mode', async () => {
+    const cwd = mk({ data: null })
+    fs.writeFileSync(path.join(cwd, 'data', 'db.json'), DB)
+    const s = await loadMode({ OPENGYM_TOKEN: 't1' }, cwd)
+    expect(s.mode()).toBe('file')
+  })
+
+  test('no data directory but a token means remote, said once on stderr', async () => {
+    const logs = []
+    vi.spyOn(console, 'error').mockImplementation((...a) => logs.push(a.join(' ')))
+    const s = await loadMode({ OPENGYM_TOKEN: 't1', OPENGYM_URL: 'http://gym.example:8080' }, nowhere())
+    expect(s.mode()).toBe('remote')
+    s.init()
+    expect(s.getState()).toBeNull()
+    expect(logs).toEqual(['[opengym-mcp] no data directory here; reading through http://gym.example:8080'])
+  })
+
+  test('no data directory and no token is the missing-directory error it always was', async () => {
+    const s = await loadMode({}, nowhere())
+    expect(() => s.init()).toThrow(/OPENGYM_DATA dir does not exist/)
+  })
+
+  test('refresh() in file mode is a no-op', async () => {
+    const s = await loadMode({ OPENGYM_DATA: mk({ 'db.json': DB, 'state-alex.json': JSON.stringify({ unit: 'lb' }) }), OPENGYM_TOKEN: 't1', OPENGYM_URL: 'http://127.0.0.1:1' })
+    await expect(s.refresh()).resolves.toBeUndefined()
+    expect(s.getState().unit).toBe('lb')
+  })
+})

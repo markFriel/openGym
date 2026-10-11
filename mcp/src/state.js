@@ -1,10 +1,23 @@
 /* opengym-mcp state — reads ./data/state-<uid>.json + db.json (read-only). Cached with an
    fs.watch + mtime fallback so a session the api server just wrote is visible on the next
-   tool call without a restart. */
+   tool call without a restart.
+
+   Remote mode: on a machine that cannot see the data directory, the same document comes from the
+   api instead (GET /api/data with the paired token). refresh() runs before every tool call; it
+   asks GET /api/data/rev and fetches the whole document only when the revision moved. */
 import fs from 'node:fs'
 import path from 'node:path'
+import { whoami, fetchRev, fetchState, hasToken, baseUrl } from './client.js'
 
 const DATA_DIR = process.env.OPENGYM_DATA || path.join(process.cwd(), 'data')
+
+// 'file' or 'remote', decided once by init(); null until then.
+let _mode = null
+// Remote mode cache: the whoami user, the document and the revision it was fetched at.
+let _rUser = null
+let _rState = null
+let _rRev = undefined
+let _rWid = undefined
 
 // null = no state file (brand-new account); undefined = not yet loaded.
 let _state = undefined
@@ -81,8 +94,24 @@ function ambiguousUid(ids) {
   return err
 }
 
-// Idempotent. Picks the uid, loads db.json, attaches the watcher, primes state.
+// Which mode: OPENGYM_REMOTE=1 forces remote; a data directory (named or the default ./data)
+// means file; no directory but a paired token means remote; otherwise the missing directory is
+// the error it always was.
+function pickMode() {
+  if ((process.env.OPENGYM_REMOTE || '').trim() === '1') return 'remote'
+  if ((process.env.OPENGYM_DATA || '').trim() || fs.existsSync(DATA_DIR)) return 'file'
+  if (hasToken()) {
+    console.error(`[opengym-mcp] no data directory here; reading through ${baseUrl()}`)
+    return 'remote'
+  }
+  return 'file'
+}
+
+// Idempotent. Picks the mode; in file mode also picks the uid, loads db.json, attaches the
+// watcher, primes state. Remote mode does no network here: refresh() does that.
 export function init() {
+  if (_mode === null) _mode = pickMode()
+  if (_mode === 'remote') return
   if (_uid !== null) return
   if (!fs.existsSync(DATA_DIR)) throw new Error(`OPENGYM_DATA dir does not exist: ${DATA_DIR}`)
   _uid = resolveUid()
@@ -115,6 +144,7 @@ export function init() {
 // Returns the state object, or null for a fresh account that never signed in on a device.
 export function getState() {
   init()
+  if (_mode === 'remote') return _rState
   const file = stateFile(_uid)
   // Re-read if the file's mtime changed since our last load — covers watcher omissions and
   // platforms with no fs.watch.
@@ -139,14 +169,46 @@ export function getState() {
 // Returns the user record (id + name). No passkey material, no VAPID keys, no push subs.
 export function getUser() {
   init()
+  if (_mode === 'remote') return _rUser ? { id: _rUser.id, name: _rUser.name, created: null } : { id: null, name: 'Profile', created: null }
   const u = _db.users.find(x => x.id === _uid) || { id: _uid, name: 'Profile', created: null }
   return { id: u.id, name: u.name, created: u.created || null }
 }
 
 export const dataDir = () => DATA_DIR
 
+export function mode() {
+  init()
+  return _mode
+}
+
+// Brings the remote document up to date before a tool call. A no-op in file mode, where the
+// watcher and the mtime check already do this. Errors (ENOTOKEN, EAUTH, ECONN, EHTTP) propagate
+// so the tool call reports them.
+let _refreshing = null
+
+export async function refresh() {
+  init()
+  if (_mode !== 'remote') return
+  // Calls that overlap share one round trip.
+  if (!_refreshing) _refreshing = pull().finally(() => { _refreshing = null })
+  return _refreshing
+}
+
+async function pull() {
+  if (!_rUser) _rUser = await whoami()
+  const { rev, wid } = await fetchRev()
+  if (_rRev !== undefined && rev === _rRev && wid === _rWid) return
+  const got = await fetchState()
+  // Same shape the frontend builds on pullState, as in file mode. A null state is a profile
+  // that never synced from a device.
+  _rState = got.state ? Object.assign({}, defaultsShape(), got.state) : null
+  _rRev = got.rev
+  _rWid = got.wid
+}
+
 // Test-only: work against a passed-in state, not the disk.
 export function _seedStateForTests(state) {
+  _mode = 'file'
   _uid = 'test-uid'
   _db = { users: [{ id: _uid, name: 'Test', created: '2026-07-26T00:00:00.000Z' }], creds: [], subs: [], invites: [] }
   _state = state

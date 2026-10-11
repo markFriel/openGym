@@ -42,6 +42,23 @@ node src/index.js
 OPENGYM_UID=<your-uid> OPENGYM_DATA=/path/to/openGym/data node src/index.js
 ```
 
+#### Remote mode
+
+The server does not have to run on the machine that holds `./data`. On any machine that can
+reach the api (over Tailscale, say), give it only `OPENGYM_URL` and a paired token (step 3) and
+no data directory: when neither `OPENGYM_DATA` is set nor `./data` exists, but a token is there,
+it reads through the api instead and says so on stderr
+(`no data directory here; reading through <url>`). `OPENGYM_REMOTE=1` forces remote mode even
+where a data directory exists.
+
+```bash
+OPENGYM_URL=https://gym.example.ts.net node src/index.js
+```
+
+What it costs: one `GET /api/data/rev` before every tool call, and a full `GET /api/data` only
+when the revision moved since the last one. What it cannot do: nothing; reads and writes both
+work. `OPENGYM_UID` is ignored, because the token names the profile.
+
 ### 3. Pair it for writes
 
 In the app open **Settings → Pair the mobile app**. It shows a short code. Redeem it from `mcp/`:
@@ -65,8 +82,11 @@ same profile `OPENGYM_UID` reads.
 | `OPENGYM_TOKEN` | A raw token. Used instead of any file; when the api renews it, the new one lasts only as long as the process. |
 | `OPENGYM_TOKEN_FILE` | A token file somewhere other than the default path. `pair` writes there too when it is set (or pass `--token-file`). |
 
-On start the server says on stderr which mode it is in: `read+write, token from <source>` or
-`read-only: no token`. Nothing goes over the network until the first write tool runs.
+On start the server says on stderr which profile it serves (`serving profile <name> (<id>)`,
+with `through <url>` added in remote mode) and whether it can write: `read+write, token from
+<source>` or `read-only: no token`. With a data directory nothing goes over the network until
+the first write tool runs; in remote mode the server fetches the profile once at start, and a
+failure there is only logged, since every tool call tries again and reports the error itself.
 
 ### 4. Register with your LLM client
 
@@ -298,8 +318,8 @@ dependencies landed in `frontend/`, no public exports changed.
   running on the user's box. Writes use the pairing the app already has for phones, and a token
   the api already knows how to renew and revoke. No passkey material, VAPID keys or session
   secrets cross either boundary.
-- **No telemetry, no network beyond your own instance.** Reads `./data/*.json`; writes talk only
-  to `OPENGYM_URL`. It exits when the LLM client disconnects.
+- **No telemetry, no network beyond your own instance.** Reads `./data/*.json` (or, in remote
+  mode, `GET /api/data`); writes talk only to `OPENGYM_URL`. It exits when the LLM client disconnects.
 
 ## Tests
 
@@ -308,7 +328,7 @@ cd mcp && npm test
 node scripts/check-node-loadable.mjs
 ```
 
-181 cases in 6 files, seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic
+198 cases in 7 files, seeding state from `frontend/src/lib/demoSeed.js` (the same deterministic
 fixture the public demo runs on):
 
 - `test/tools.test.js` (87) pins the read tools' JSON shape and the user-facing edge cases:
@@ -322,7 +342,11 @@ fixture the public demo runs on):
 - `test/integration.test.js` (6) boots the real `api/server.js` on a temporary data directory
   and commits through it, including a change the app saved between the read and the push. It
   runs when `api/node_modules` exists and skips otherwise.
-- `test/state.test.js` (7) and `test/labels.test.js` (1) cover data loading and labels.
+- `test/remote.test.js` (11) drives remote mode against a fake api: what the first refresh
+  fetches, skipping the document when the revision has not moved, the defaults merge, the
+  token's user, a never-synced profile, `EAUTH` and `ECONN`, and a read tool answering from it.
+- `test/state.test.js` (13) and `test/labels.test.js` (1) cover data loading, mode selection and
+  labels.
 
 "Today" is pinned via `vi.useFakeTimers({ now: ..., toFake: ['Date'] })` so date-dependent
 tools see consistent values regardless of when the suite runs. The pure lib functions have

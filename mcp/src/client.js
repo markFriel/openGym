@@ -162,6 +162,15 @@ export async function fetchState() {
   return { state, rev: r.body.rev ?? state?._rev ?? 0, wid: state?._wid ?? null }
 }
 
+// The revision alone, cheap on the server: remote mode asks this before every tool call and
+// fetches the document only when it moved.
+export async function fetchRev() {
+  await ensureSession()
+  const r = await authed('/api/data/rev')
+  if (r.status !== 200) throw httpError('GET /api/data/rev', r)
+  return { rev: r.body.rev ?? 0, wid: r.body.wid ?? null }
+}
+
 async function put(state, baseRev, baseWid) {
   const body = { state, baseRev, stamped: true }
   if (typeof baseWid === 'string' && baseWid) body.baseWid = baseWid
